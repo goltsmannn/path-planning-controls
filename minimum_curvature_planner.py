@@ -3,6 +3,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from centerline_extraction import CenterlineExtractor
+import time
 
 class MinimumCurvaturePlanner(Node):
     def __init__(self):        
@@ -23,7 +24,12 @@ class MinimumCurvaturePlanner(Node):
 
         self.centerline_extractor = CenterlineExtractor(max_track_width=2.0)
 
+        self.last_req = time.time()
+
     def scan_callback(self, msg: LaserScan):
+        if time.time() - self.last_req < 1:  # limit to 1 Hz
+            return
+        self.last_req = time.time()
         self.centerline_extractor.extract_centerline(msg)
 
 def main():
