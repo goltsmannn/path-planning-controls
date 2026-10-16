@@ -2,7 +2,10 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
-from centerline_extraction import CenterlineExtractor
+from rclpy.utilities import remove_ros_args
+from centerline_extraction import CenterlineExtractor, load_saved_scans
+import os
+import sys
 import time
 
 class MinimumCurvaturePlanner(Node):
@@ -32,7 +35,45 @@ class MinimumCurvaturePlanner(Node):
         self.last_req = time.time()
         self.centerline_extractor.extract_centerline(msg)
 
+def replay(path):
+    """Run the extractor on scans saved via the plot button; left/right arrows switch scans."""
+    import matplotlib.pyplot as plt
+    scans = load_saved_scans(path)
+    if not scans:
+        print(f'[replay] No scans in {path}', flush=True)
+        return
+    # matplotlib binds left/right to view back/forward by default
+    for keymap in ('keymap.back', 'keymap.forward'):
+        plt.rcParams[keymap] = [k for k in plt.rcParams[keymap] if k not in ('left', 'right')]
+
+    extractor = CenterlineExtractor(max_track_width=2.0)
+    index = 0
+
+    def show():
+        extractor.extract_centerline(scans[index])
+        extractor.ax.set_title(f'{os.path.basename(path)}: scan {index + 1}/{len(scans)}  (←/→ to switch)')
+        extractor.fig.canvas.draw_idle()
+
+    def on_key(event):
+        nonlocal index
+        step = {'right': 1, 'left': -1}.get(event.key)
+        if step is None or len(scans) < 2:
+            return
+        index = (index + step) % len(scans)
+        show()
+
+    extractor.fig.canvas.mpl_connect('key_press_event', on_key)
+    show()
+    plt.show(block=True)
+
+
 def main():
+    # remove_ros_args so --ros-args (added by ros2 run/launch) isn't mistaken for a file
+    args = remove_ros_args(sys.argv)[1:]
+    if args:
+        replay(args[0])
+        return
+
     rclpy.init()
     node = MinimumCurvaturePlanner()
     try:
@@ -40,6 +81,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        node.centerline_extractor.write_saved_scans()  # flush scans saved via the plot button
         node.destroy_node()
         rclpy.shutdown()
         import matplotlib.pyplot as plt
